@@ -17,7 +17,7 @@ test('e2e: load extension, open UI, download video and verify welcome_to_insight
     ],
     acceptDownloads: true,
   });
-// navigate to target page
+  // navigate to target page
   try {
     const page = await context.newPage();
     await page.goto(targetUrl, { waitUntil: 'networkidle' });
@@ -34,7 +34,10 @@ test('e2e: load extension, open UI, download video and verify welcome_to_insight
       await ui.screenshot({ path: `extension-login.png`, fullPage: true });
       if (submit) await submit.click();
       await ui.waitForTimeout(800);
-    } catch {}
+    } catch (error) {
+      console.error('Failed to authorize extension:', error);
+      throw error; 
+    }
 
     // back to target page and trigger download
     await page.bringToFront();
@@ -69,43 +72,52 @@ test('e2e: load extension, open UI, download video and verify welcome_to_insight
         if (!manager) return true;
         return false;
       }, { timeout: 120_000 });
-    } catch {
-      
+    } catch (error) {
+      console.error('Failed to start video download:', error);
+      throw error; // не можна продовжувати тест
     }
 
     // poll Downloads folder for the expected file name and stable size
-    const downloadsDir = path.join(os.homedir(), 'Downloads');
+    const downloadsDir = path.join(os.homedir(), "Downloads");
     const deadline = Date.now() + 120_000;
-    const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
+    const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
     let foundPath: string | null = null;
 
     while (Date.now() < deadline) {
       if (fs.existsSync(downloadsDir)) {
         for (const name of fs.readdirSync(downloadsDir)) {
-          if (!name.toLowerCase().includes(downloadsKeyword.toLowerCase())) continue;
+          if (!name.toLowerCase().includes(downloadsKeyword.toLowerCase()))
+            continue;
           const full = path.join(downloadsDir, name);
           try {
             const s1 = fs.statSync(full);
             if (!s1.isFile() || s1.size === 0) continue;
             await sleep(500);
             const s2 = fs.statSync(full);
-            if (s2.size === s1.size) { foundPath = full; break; }
-          } catch {}
+            if (s2.size === s1.size) {
+              foundPath = full;
+              break;
+            }
+          } catch (error) {
+            console.error("Failed to download video:", error);
+            throw error; // не можна продовжувати тест
+          }
         }
       }
       if (foundPath) break;
       await sleep(1000);
     }
 
-    if (!foundPath) throw new Error(`No downloaded file containing "${downloadsKeyword}" found in Downloads.`);
+    if (!foundPath)
+      throw new Error(
+        `No downloaded file containing "${downloadsKeyword}" found in Downloads.`
+      );
 
-    const tmpDir = path.resolve(__dirname, '..', '..', '..', 'tmp-downloads');
+    const tmpDir = path.resolve(__dirname, "..", "..", "..", "tmp-downloads");
     if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true });
     const dest = path.join(tmpDir, path.basename(foundPath));
     fs.copyFileSync(foundPath, dest);
-
-    try { await page.screenshot({ path: `after-download.png`, fullPage: true }); } catch {}
-
+    await page.screenshot({ path: `after-download.png`, fullPage: true });
     const stats = fs.statSync(dest);
     expect(stats.size).toBeGreaterThan(0);
   } finally {
